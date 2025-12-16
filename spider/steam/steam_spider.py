@@ -12,6 +12,31 @@ HEADERS = {
     "Cookie": "birthtime=946684801; lastagecheckage=1-0-1900; wants_mature_content=1;"
 }
 
+def get_game_reviews(app_id):
+    """
+    调用 Steam API 获取该游戏最热门的 5 条中文评论
+    用于 SFT 微调素材
+    """
+    # url = f"https://store.steampowered.com/appreviews/{app_id}?json=1&language=schinese&filter=summary&num_per_page=5"
+    url = f"https://store.steampowered.com/appreviews/{app_id}?json=1&language=schinese&filter=summary"
+    try:
+        # 这里不需要 cookie 也能跑，如果报错再加 header
+        resp = requests.get(url, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            if data['success'] == 1:
+                reviews = []
+                for r in data['reviews']:
+                    # 只要纯文本，去掉太短的垃圾评论
+                    content = r['review'].strip()
+                    if len(content) > 10: 
+                        reviews.append(content)
+                return reviews
+    except:
+        pass
+    return []
+    
+
 def run_spider(max_pages=5):
     print(f"🚀 [Step 1] 开始爬取原始数据 (Raw Data)...")
     raw_games = []
@@ -51,18 +76,27 @@ def run_spider(max_pages=5):
                     review_sum = row.select_one(".search_review_summary")
                     review_raw = review_sum['data-tooltip-html'] if review_sum else ""
 
+                    # ===  新增：获取评论数据 ===
+                    # 只有当我们需要 SFT 素材时才跑这个，会慢一点点
+                    reviews = get_game_reviews(app_id)
+
                     raw_games.append({
                         "item_id": app_id,
                         "title": title,
                         "price_raw": price_raw,
                         "tags_raw": tags_raw,      # 存为 List
                         "review_raw": review_raw,  # 存原始好评 HTML
-                        "cover_url": img_url
+                        "cover_url": img_url,
+                        "user_reviews": reviews    # 把爬到的评论存成列表
                     })
-                except:
+
+                    print(f"   已获取: {title} (含 {len(reviews)} 条评论)")
+                    
+                except Exception as e:
                     continue
             
-            time.sleep(random.uniform(1, 3))
+            # 稍微多睡一会，因为多请求了 API
+            time.sleep(random.uniform(3, 6))
             
         except Exception as e:
             print(f"   ❌ Error: {e}")
@@ -71,8 +105,11 @@ def run_spider(max_pages=5):
     df = pd.DataFrame(raw_games)
     # 强制把 tags 存为字符串形式，避免 CSV 读取歧义
     df['tags_raw'] = df['tags_raw'].apply(json.dumps)
+    # 存 review 时防止 CSV 错乱，建议直接存 JSON 格式的字符串
+    df['user_reviews'] = df['user_reviews'].apply(json.dumps, ensure_ascii=False)
     df.to_csv("../../data/steam/steam_raw_data.csv", index=False, encoding='utf-8-sig')
     print(f"✅ [Step 1] 完成！原始数据已保存至 '../../data/steam/steam_raw_data.csv' (共 {len(df)} 条)")
 
 if __name__ == "__main__":
-    run_spider(max_pages=20) # 建议爬 5 页，约 250 条数据
+    run_spider(max_pages=60) # 建议爬 5 页，约 250 条数据
+    # 25 * 60 = 1500 条数据
