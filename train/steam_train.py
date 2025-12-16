@@ -3,10 +3,13 @@ import numpy as np
 import ast
 import torch
 import os
+import random
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import LabelEncoder, MinMaxScaler
 from deepctr_torch.inputs import SparseFeat, DenseFeat, VarLenSparseFeat
 from deepctr_torch.models import DeepFM
+from deepctr_torch.callbacks import EarlyStopping
+import torch.optim as optim
 
 # ==========================================
 # ⚙️ 配置中心
@@ -23,9 +26,22 @@ class SteamConfig:
     
     BATCH_SIZE = 256
     EPOCHS = 20
+    LEARNING_RATE = 0.001
     DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+    SEED = 2025
 
 cfg = SteamConfig()
+
+# --- 固定随机种子 (保证结果可复现) ---
+def seed_everything(seed=2024):
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+
+seed_everything(cfg.SEED)
 
 # ==========================================
 # 🛠️ 核心工具函数
@@ -120,9 +136,14 @@ if __name__ == "__main__":
                    dnn_dropout=cfg.DNN_DROPOUT,
                    device=cfg.DEVICE)
     
-    model.compile("adam", "binary_crossentropy", metrics=["binary_crossentropy", "auc"])
+    model.compile(optimizer=optim.Adam(model.parameters(), lr=cfg.LEARNING_RATE), 
+              loss="binary_crossentropy", 
+              metrics=["binary_crossentropy", "auc"])
     
-    history = model.fit(input_dict, target, batch_size=cfg.BATCH_SIZE, epochs=cfg.EPOCHS, verbose=2, validation_split=0.2)
+    es = EarlyStopping(monitor='val_auc', min_delta=0, patience=2, mode='max')
+    
+    print(f"🚀 开始训练 (Epochs: {cfg.EPOCHS}, Batch: {cfg.BATCH_SIZE})...")
+    history = model.fit(input_dict, target, batch_size=cfg.BATCH_SIZE, epochs=cfg.EPOCHS, verbose=2, validation_split=0.2, callbacks=[es])
     
     torch.save(model.state_dict(), cfg.MODEL_PATH)
     print(f"✅ 模型已保存: {cfg.MODEL_PATH}")
