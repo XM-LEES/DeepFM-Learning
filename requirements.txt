@@ -12,3 +12,9 @@ soupsieve==2.8
 typing-extensions==4.15.0
 tzdata==2025.3
 urllib3==2.6.2
+torch
+deepctr-torch
+scikit-learn
+flask
+pyngrok
+matplotlib
